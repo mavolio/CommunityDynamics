@@ -9,7 +9,7 @@ library(gtable)
 
 
 #work
-sim<-read.csv('C:\\Users\\megha\\Dropbox\\SESYNC\\SESYNC_RACs\\R Files/SimCom_Sept.csv')%>%
+sim<-read.csv('SimCom_Sept.csv')%>%
   mutate(time=as.numeric(iteration),
          id2=paste(id, site, sep="::"))%>%
   select(-X, -sample, -iteration)
@@ -51,74 +51,86 @@ E_q<-function(x){
 
 
 #NOTE this is where I tried to make a loop to rank for each dataset.
-
-##add ranks 
-sim_rank_pres<-sim%>%
-  filter(abundance!=0)%>%
-  tbl_df()%>%
-  group_by(id, time, site)%>%
-  mutate(rank=rank(-abundance, ties.method = "average"))%>%
-  tbl_df()
-
-#adding zeros
-sim_addzero <- sim %>%
-  group_by(id) %>%
-  nest() %>%
-  mutate(spread_df = purrr::map(data, ~spread(., key=species, value=abundance, fill=0) %>%
-                                  gather(key=species, value=abundance, -site, -time, -id2))) %>%
-  unnest(spread_df)
-
-###make zero abundant species have the rank S+1 (the size of the species pool plus 1)
-##pull out zeros
-sim_zeros<-sim_addzero%>%
-  filter(abundance==0)
-##get species richness for each year
-sim_S<-group_by(sim, id, time, site, id2)%>%
-  summarize(S=S(abundance))
-##merge together make zero abundances rank S+1
-sim_zero_rank<-merge(sim_zeros, sim_S, by=c("id","time","site", "id2"))%>%
-  mutate(rank=S+1)%>%
-  select(-S)%>%
-  tbl_df()
-##combine all
-sim_rank<-rbind(sim_rank_pres, sim_zero_rank)
-
-##calculating re-ordering
-
-reordering=data.frame(id=c(), time=c(), MRSc=c())#expeiment year is year of timestep2
-
-spc_id<-unique(sim_rank$id2)
-
-for (i in 1:length(spc_id)){
-  subset<-sim_rank%>%
-    filter(id2==spc_id[i])
-  id2<-spc_id[i]
-  #now get all timestep within an experiment
-  timestep<-sort(unique(subset$time))    
+#' @param sim foo dataset with columns for time, plot, species, and abundance, (and optionally an id column for grouping)
+add_ranks_for_non_present_and_present_species <- function(sim) {
+  ##add ranks 
+  sim_rank_pres<-sim%>%
+    filter(abundance!=0)%>%
+    tbl_df()%>%
+    group_by(id, time, site)%>%
+    mutate(rank=rank(-abundance, ties.method = "average"))%>%
+    tbl_df()
   
-  for(i in 1:(length(timestep)-1)) {#minus 1 will keep me in year bounds NOT WORKING
-    subset_t1<-subset%>%
-      filter(time==timestep[i])
-    
-    subset_t2<-subset%>%
-      filter(time==timestep[i+1])
-    
-    subset_t12<-merge(subset_t1, subset_t2, by=c("species","id2"), all=T)%>%
-      filter(abundance.x!=0|abundance.y!=0)
-    
-    MRSc<-mean(abs(subset_t12$rank.x-subset_t12$rank.y))/nrow(subset_t12)
-   
-    metrics<-data.frame(id2=id2, time=timestep[i+1], MRSc=MRSc)#spc_id
-    ##calculate differences for these year comparison and rbind to what I want.
-    
-    reordering=rbind(metrics, reordering)  
-  }
+  #adding zeros
+  sim_addzero <- sim %>%
+    group_by(id) %>%
+    nest() %>%
+    mutate(spread_df = purrr::map(data, ~spread(., key=species, value=abundance, fill=0) %>%
+                                    gather(key=species, value=abundance, -site, -time, -id2))) %>%
+    unnest(spread_df)
+  
+  ###make zero abundant species have the rank S+1 (the size of the species pool plus 1)
+  ##pull out zeros
+  sim_zeros<-sim_addzero%>%
+    filter(abundance==0)
+  ##get species richness for each year
+  sim_S<-group_by(sim, id, time, site, id2)%>%
+    summarize(S=S(abundance))
+  ##merge together make zero abundances rank S+1
+  sim_zero_rank<-merge(sim_zeros, sim_S, by=c("id","time","site", "id2"))%>%
+    mutate(rank=S+1)%>%
+    select(-S)%>%
+    tbl_df()
+  ##combine all
+  sim_rank<-rbind(sim_rank_pres, sim_zero_rank)
 }
 
-sim_reorder<-reordering%>%
-  separate(id2, c("id","site"), sep="::")%>%
-  group_by(id, time)%>%
-  summarise(MRSc=mean(MRSc))
+##calculating re-ordering
+calculate_reordering <- function(sim_rank) {
+  reordering=data.frame(id=c(), time=c(), MRSc=c())#expeiment year is year of timestep2
+  
+  spc_id<-unique(sim_rank$id2)
+  
+  for (i in 1:length(spc_id)){
+    subset<-sim_rank%>%
+      filter(id2==spc_id[i])
+    id2<-spc_id[i]
+    #now get all timestep within an experiment
+    timestep<-sort(unique(subset$time))    
+    
+    for(i in 1:(length(timestep)-1)) {#minus 1 will keep me in year bounds NOT WORKING
+      subset_t1<-subset%>%
+        filter(time==timestep[i])
+      
+      subset_t2<-subset%>%
+        filter(time==timestep[i+1])
+      
+      subset_t12<-merge(subset_t1, subset_t2, by=c("species","id2"), all=T)%>%
+        filter(abundance.x!=0|abundance.y!=0)
+      
+      MRSc<-mean(abs(subset_t12$rank.x-subset_t12$rank.y))/nrow(subset_t12)
+      
+      metrics<-data.frame(id2=id2, time=timestep[i+1], MRSc=MRSc)#spc_id
+      ##calculate differences for these year comparison and rbind to what I want.
+      
+      reordering=rbind(metrics, reordering)  
+    }
+  }
+  return(reordering)
+}
+
+mean_rank_shift_corrected <- function(sim) {
+  sim_rank <- add_ranks_for_non_present_and_present_species(sim)
+  result <- calculate_reordering(sim_rank)
+  return(result)
+}
+
+ranked <- mean_rank_shift_corrected(sim)
+
+#sim_reorder<-reordering%>%
+#  separate(id2, c("id","site"), sep="::")%>%
+#  group_by(id, time)%>%
+#  summarise(MRSc=mean(MRSc))
 
 #4/5)Bray-Curtis Mean Change & Bray-Curtis Dissimilarity 
 
