@@ -119,8 +119,16 @@ calculate_reordering <- function(sim_rank) {
   return(reordering)
 }
 
-mean_rank_shift_corrected <- function(sim) {
-  sim_rank <- add_ranks_for_non_present_and_present_species(sim)
+# TODO define functions throughout whole file
+# TODO rename data frame argument to df
+# TODO add arguments to name the time, site, species, and abundance columns
+# TODO refactor to allow users to use arbitrary column names (remove dplyr?)
+# TODO refactor to optimize speed of function
+# TODO add new function to codyn
+# TODO document the functions fully
+# TODO add tests to codyn for the new functions
+mean_rank_shift_corrected <- function(df) {
+  sim_rank <- add_ranks_for_non_present_and_present_species(df)
   result <- calculate_reordering(sim_rank)
   return(result)
 }
